@@ -14,22 +14,22 @@ public class AnomalyDetectionService : IAnomalyDetectionService
     public void Fit(IReadOnlyList<SensorReading> readings)
     {
         var validReadings = readings.Where(r =>
-            r.Temperature.HasValue && r.Humidity.HasValue && r.DewPoint.HasValue).ToList();
+            r.temperature.HasValue && r.humidity.HasValue && r.dew_point.HasValue).ToList();
 
         if (validReadings.Count == 0) return;
 
-        _tempStats = DescriptiveStats.From(validReadings.Select(r => r.Temperature!.Value));
-        _humStats  = DescriptiveStats.From(validReadings.Select(r => r.Humidity!.Value));
-        _dewStats  = DescriptiveStats.From(validReadings.Select(r => r.DewPoint!.Value));
+        _tempStats = DescriptiveStats.From(validReadings.Select(r => r.temperature!.Value));
+        _humStats  = DescriptiveStats.From(validReadings.Select(r => r.humidity!.Value));
+        _dewStats  = DescriptiveStats.From(validReadings.Select(r => r.dew_point!.Value));
 
         foreach (var reading in validReadings)
         {
-            if (!_humidityBySensor.TryGetValue(reading.SensorId, out var list))
+            if (!_humidityBySensor.TryGetValue(reading.sensor_id, out var list))
             {
                 list = [];
-                _humidityBySensor[reading.SensorId] = list;
+                _humidityBySensor[reading.sensor_id] = list;
             }
-            list.Add(reading.Humidity!.Value);
+            list.Add(reading.humidity!.Value);
         }
 
         _staleSensors = _humidityBySensor
@@ -41,23 +41,23 @@ public class AnomalyDetectionService : IAnomalyDetectionService
     public bool IsAnomaly(SensorReading reading)
     {
 
-        if (!reading.Temperature.HasValue || !reading.Humidity.HasValue || !reading.DewPoint.HasValue)
+        if (!reading.temperature.HasValue || !reading.humidity.HasValue || !reading.dew_point.HasValue)
             return false;
 
         if (_tempStats is null || _humStats is null || _dewStats is null)
             return false;
 
-        if (_staleSensors.Contains(reading.SensorId))
+        if (_staleSensors.Contains(reading.sensor_id))
             return true;
 
-        if (IsZScoreAnomaly(reading.Temperature.Value, _tempStats) ||
-            IsZScoreAnomaly(reading.Humidity.Value, _humStats)     ||
-            IsZScoreAnomaly(reading.DewPoint.Value, _dewStats))
+        if (IsZScoreAnomaly(reading.temperature.Value, _tempStats) ||
+            IsZScoreAnomaly(reading.humidity.Value, _humStats)     ||
+            IsZScoreAnomaly(reading.dew_point.Value, _dewStats))
             return true;
 
-        if (IsIqrAnomaly(reading.Temperature.Value, _tempStats) ||
-            IsIqrAnomaly(reading.Humidity.Value, _humStats)     ||
-            IsIqrAnomaly(reading.DewPoint.Value, _dewStats))
+        if (IsIqrAnomaly(reading.temperature.Value, _tempStats) ||
+            IsIqrAnomaly(reading.humidity.Value, _humStats)     ||
+            IsIqrAnomaly(reading.dew_point.Value, _dewStats))
             return true;
 
         return false;

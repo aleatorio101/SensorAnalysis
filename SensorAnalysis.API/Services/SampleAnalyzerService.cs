@@ -24,13 +24,13 @@ public class SampleAnalyzerService : ISampleAnalyzerService
 
     public AnalysisResult Analyze(SensorReading reading)
     {
-        var tempAnalysis     = _threshold.Analyze(reading.Temperature, _config.Temperature);
-        var humidityAnalysis = _threshold.Analyze(reading.Humidity,    _config.Humidity);
-        var dewPointAnalysis = _threshold.Analyze(reading.DewPoint,    _config.DewPoint);
+        var tempAnalysis     = _threshold.Analyze(reading.temperature, _config.Temperature);
+        var humidityAnalysis = _threshold.Analyze(reading.humidity,    _config.Humidity);
+        var dewPointAnalysis = _threshold.Analyze(reading.dew_point,    _config.DewPoint);
 
-        bool isInvalid = !reading.Temperature.HasValue
-                      && !reading.Humidity.HasValue
-                      && !reading.DewPoint.HasValue;
+        bool isInvalid = !reading.temperature.HasValue
+                      && !reading.humidity.HasValue
+                      && !reading.dew_point.HasValue;
 
         string anomalyStatus;
         if (isInvalid)
@@ -42,9 +42,9 @@ public class SampleAnalyzerService : ISampleAnalyzerService
 
         return new AnalysisResult
         {
-            SensorId    = reading.SensorId,
+            SensorId    = reading.sensor_id,
             Type        = reading.Type,
-            Timestamp   = reading.Timestamp,
+            Timestamp   = reading.timestamp,
             Temperature = tempAnalysis,
             Humidity    = humidityAnalysis,
             DewPoint    = dewPointAnalysis,
