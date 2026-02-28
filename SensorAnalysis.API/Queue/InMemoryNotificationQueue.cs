@@ -3,10 +3,6 @@ using SensorAnalysis.API.Models;
 
 namespace SensorAnalysis.API.Queue;
 
-/// <summary>
-/// Thread-safe in-memory message queue that simulates publishing to a broker
-/// (e.g., RabbitMQ). The consumer side is intentionally not implemented per spec.
-/// </summary>
 public class InMemoryNotificationQueue : INotificationQueue
 {
     private readonly ConcurrentQueue<NotificationMessage> _queue = new();

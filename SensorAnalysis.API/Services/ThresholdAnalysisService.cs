@@ -2,10 +2,6 @@ using SensorAnalysis.API.Models;
 
 namespace SensorAnalysis.API.Services;
 
-/// <summary>
-/// Evaluates a single sensor value against alert/critical thresholds.
-/// Returns the most severe breach found (critical > alert > normal).
-/// </summary>
 public class ThresholdAnalysisService : IThresholdAnalysisService
 {
     public VariableAnalysis Analyze(double? value, VariableThreshold threshold)
