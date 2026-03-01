@@ -105,7 +105,9 @@ Sensores em que mais de 80% das leituras de umidade possuem exatamente o mesmo v
 
 ## Fila de Notificações
 
-Amostras com status **critical** em qualquer variável, ou classificadas como **anomalia**, são publicadas na fila `log_notifications` (implementada como `ConcurrentQueue<T>` in-memory).
+Amostras com status **critical** em qualquer variável, ou classificadas como **anomalia**, são publicadas na fila `log_notifications` via **RabbitMQ**.
+
+A fila é declarada como **durable** mensagens sobrevivem a restarts do broker. A conexão possui **reconexão automática** configurada com intervalo de 10 segundos.
 
 O consumidor da fila **não foi implementado** conforme especificação — apenas a publicação ocorre.
 
