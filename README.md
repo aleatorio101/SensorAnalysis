@@ -1,6 +1,6 @@
-# Sensor Analysis API
+# Sensor Analysis
 
-API REST em **ASP.NET Core 8** para processamento assíncrono de amostras de sensores ambientais com detecção de anomalias.
+Sistema completo para processamento assíncrono de amostras de sensores ambientais com detecção de anomalias, fila de notificações via RabbitMQ e dashboard interativo.
 
 ---
 
@@ -8,30 +8,51 @@ API REST em **ASP.NET Core 8** para processamento assíncrono de amostras de sen
 
 | Camada | Tecnologia |
 |---|---|
-| Runtime | .NET 8 / ASP.NET Core 8 |
+| Backend | .NET 8 / ASP.NET Core 8 |
+| Frontend | Vue 3 + Vite + Chart.js |
+| Fila de mensagens | RabbitMQ 3.13 + RabbitMQ.Client 6.8.1 |
 | Testes | xUnit + FluentAssertions + NSubstitute |
 | Documentação | Swagger / Swashbuckle |
 | Detecção de anomalias | Implementação própria: Z-Score + IQR + heurística de sensor travado |
+| Infraestrutura | Docker + docker-compose |
 
 ---
 
 ## Como executar
 
 ### Pré-requisitos
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop)
 
-### Rodando a API
+### Rodando tudo junto
+```bash
+docker-compose up --build
+```
 
+| Serviço | URL |
+|---|---|
+| Frontend | http://localhost:3000 |
+| API | http://localhost:5000 |
+| Swagger | http://localhost:5000 |
+| RabbitMQ UI | http://localhost:15672 (guest/guest) |
+
+### Rodando localmente (sem Docker)
+
+**API:**
 ```bash
 cd SensorAnalysis.API
 dotnet run
 ```
 
-A API ficará disponível em `https://localhost:5001` (ou `http://localhost:5000`).  
-O Swagger UI estará acessível em `http://localhost:5000` (raiz).
+**Frontend:**
+```bash
+cd sensor-dashboard
+npm install
+npm run dev
+```
+
+> O Vite faz proxy de `/api` para `http://localhost:5000` automaticamente.
 
 ### Rodando os testes
-
 ```bash
 cd SensorAnalysis.Tests
 dotnet test
@@ -39,30 +60,54 @@ dotnet test
 
 ---
 
-## Arquitetura
-
+## Estrutura do Projeto
 ```
-SensorAnalysis.API/
-├── Controllers/
-│   └── AnalysisController.cs     # Endpoints REST
-├── Models/
-│   ├── SensorReading.cs          # Entidade de entrada
-│   ├── AnalysisResult.cs         # Resultado por amostra
-│   ├── ThresholdConfig.cs        # Limites configuráveis
-│   ├── ProcessingJob.cs          # Estado do job assíncrono
-│   └── NotificationMessage.cs    # Mensagem de fila
-├── Services/
-│   ├── IThresholdAnalysisService # Análise de limites por variável
-│   ├── IAnomalyDetectionService  # Detecção de anomalias (Z-Score + IQR)
-│   ├── ISampleAnalyzerService    # Orquestra threshold + anomalia por amostra
-│   ├── IAnalysisOrchestrator     # Gerencia o job assíncrono
-│   └── IJobRepository            # Persistência em memória dos jobs
-├── Queue/
-│   └── INotificationQueue        # Fila de mensagens (ConcurrentQueue)
-├── Middleware/
-│   └── GlobalExceptionMiddleware # Tratamento centralizado de erros
-└── Extensions/
-    └── ServiceCollectionExtensions.cs  # Registro de DI
+SensorAnalysis/
+├── docker-compose.yml
+├── README.md
+├── SensorAnalysis.sln
+├── SensorAnalysis.API/
+│   ├── Controllers/
+│   │   └── AnalysisController.cs     # Endpoints REST
+│   ├── Models/
+│   │   ├── SensorReading.cs          # Entidade de entrada
+│   │   ├── AnalysisResult.cs         # Resultado por amostra
+│   │   ├── ThresholdConfig.cs        # Limites configuráveis
+│   │   ├── ProcessingJob.cs          # Estado do job assíncrono
+│   │   └── NotificationMessage.cs    # Mensagem de fila
+│   ├── Services/
+│   │   ├── IThresholdAnalysisService # Análise de limites por variável
+│   │   ├── IAnomalyDetectionService  # Detecção de anomalias (Z-Score + IQR)
+│   │   ├── ISampleAnalyzerService    # Orquestra threshold + anomalia por amostra
+│   │   ├── IAnalysisOrchestrator     # Gerencia o job assíncrono
+│   │   └── IJobRepository            # Persistência em memória dos jobs
+│   ├── Queue/
+│   │   └── RabbitMqNotificationQueue # Publicação na fila RabbitMQ
+│   ├── Middleware/
+│   │   └── GlobalExceptionMiddleware # Tratamento centralizado de erros
+│   └── Extensions/
+│       ├── ServiceCollectionExtensions.cs  # Registro de DI
+│       └── RabbitMqExtensions.cs           # Registro da conexão RabbitMQ
+├── SensorAnalysis.Tests/
+│   ├── ThresholdAnalysisServiceTests.cs
+│   └── AnomalyDetectionServiceTests.cs
+└── sensor-dashboard/
+    ├── Dockerfile
+    ├── nginx.conf
+    └── src/
+        ├── views/
+        │   ├── UploadView.vue       # Tela de upload com drag-and-drop
+        │   ├── ProgressView.vue     # Polling de progresso com timeline
+        │   └── DashboardView.vue    # Dashboard completo com KPIs e gráficos
+        ├── components/
+        │   ├── KpiCard.vue          # Card reutilizável de métrica
+        │   ├── StatusBadge.vue      # Badge animado de status
+        │   ├── TimeSeriesChart.vue  # Gráfico temporal paginado com limites
+        │   └── SummaryDonut.vue     # Donut chart de distribuição
+        ├── composables/
+        │   └── usePolling.js        # Polling genérico com stop automático
+        └── services/
+            └── api.js               # Camada HTTP com Axios
 ```
 
 **Princípios aplicados:** SOLID, Dependency Injection, Interface Segregation, Clean Architecture por camadas, async/await correto (fire-and-forget com `Task.Run`).
@@ -107,7 +152,7 @@ Sensores em que mais de 80% das leituras de umidade possuem exatamente o mesmo v
 
 Amostras com status **critical** em qualquer variável, ou classificadas como **anomalia**, são publicadas na fila `log_notifications` via **RabbitMQ**.
 
-A fila é declarada como **durable** mensagens sobrevivem a restarts do broker. A conexão possui **reconexão automática** configurada com intervalo de 10 segundos.
+A fila é declarada como **durable** — mensagens sobrevivem a restarts do broker. A conexão possui **reconexão automática** configurada com intervalo de 10 segundos.
 
 O consumidor da fila **não foi implementado** conforme especificação — apenas a publicação ocorre.
 
