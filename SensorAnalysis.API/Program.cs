@@ -29,6 +29,7 @@ builder.Services.AddCors(opts =>
         policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
 
 
+builder.Services.AddRabbitMq(builder.Configuration);
 builder.Services.AddSensorAnalysis(builder.Configuration);
 
 var app = builder.Build();

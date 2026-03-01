@@ -15,7 +15,6 @@ public static class ServiceCollectionExtensions
             configuration.GetSection("ThresholdConfig"));
 
         services.AddSingleton<IJobRepository, InMemoryJobRepository>();
-        services.AddSingleton<INotificationQueue, InMemoryNotificationQueue>();
 
         services.AddTransient<IThresholdAnalysisService, ThresholdAnalysisService>();
         services.AddTransient<IAnomalyDetectionService, AnomalyDetectionService>();
