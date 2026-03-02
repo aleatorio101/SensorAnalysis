@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 namespace SensorAnalysis.API.Services;
 
-public class SampleAnalyzerService : ISampleAnalyzerService
+public sealed class SampleAnalyzerService : ISampleAnalyzerService
 {
     private readonly IThresholdAnalysisService _threshold;
     private readonly IAnomalyDetectionService  _anomaly;
@@ -19,26 +19,22 @@ public class SampleAnalyzerService : ISampleAnalyzerService
         _config    = config.Value;
     }
 
-    public void Prepare(IReadOnlyList<SensorReading> allReadings) =>
-        _anomaly.Fit(allReadings);
+    public void Fit(IReadOnlyList<SensorReading> readings) =>
+        _anomaly.Fit(readings);
 
     public AnalysisResult Analyze(SensorReading reading)
     {
         var tempAnalysis     = _threshold.Analyze(reading.temperature, _config.Temperature);
         var humidityAnalysis = _threshold.Analyze(reading.humidity,    _config.Humidity);
-        var dewPointAnalysis = _threshold.Analyze(reading.dew_point,    _config.DewPoint);
+        var dewPointAnalysis = _threshold.Analyze(reading.dew_point,   _config.DewPoint);
 
         bool isInvalid = !reading.temperature.HasValue
                       && !reading.humidity.HasValue
                       && !reading.dew_point.HasValue;
 
-        string anomalyStatus;
-        if (isInvalid)
-            anomalyStatus = "invalid";
-        else if (_anomaly.IsAnomaly(reading))
-            anomalyStatus = "anomaly";
-        else
-            anomalyStatus = "normal";
+        string anomalyStatus = isInvalid                   ? "invalid"
+                             : _anomaly.IsAnomaly(reading) ? "anomaly"
+                             : "normal";
 
         return new AnalysisResult
         {
