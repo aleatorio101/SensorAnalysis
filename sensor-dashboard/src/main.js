@@ -3,16 +3,18 @@ import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import './assets/main.css'
 
-import UploadView   from '@/views/UploadView.vue'
-import ProgressView from '@/views/ProgressView.vue'
+import UploadView    from '@/views/UploadView.vue'
+import ProgressView  from '@/views/ProgressView.vue'
 import DashboardView from '@/views/DashboardView.vue'
+import JobsView      from '@/views/JobsView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/',              name: 'upload',    component: UploadView },
-    { path: '/progress/:id',  name: 'progress',  component: ProgressView },
-    { path: '/dashboard/:id', name: 'dashboard', component: DashboardView }
+    { path: '/',                name: 'upload',    component: UploadView },
+    { path: '/jobs',            name: 'jobs',      component: JobsView },
+    { path: '/progress/:id',    name: 'progress',  component: ProgressView },
+    { path: '/dashboard/:id',   name: 'dashboard', component: DashboardView },
   ]
 })
 

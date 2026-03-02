@@ -7,14 +7,14 @@
         <em>Assíncrono</em> de Amostras
       </h1>
       <p class="upload-desc">
-        Carregue um arquivo <code>.json</code> contendo as leituras de sensores
-        ambientais para iniciar a análise de limiares e detecção de anomalias.
+        Carregue um ou mais arquivos <code>.json</code> para iniciar análises simultâneas.
+        Cada arquivo vira um job independente.
       </p>
     </div>
 
     <div
       class="drop-zone"
-      :class="{ 'drop-zone--active': isDragging, 'drop-zone--ready': !!selectedFile }"
+      :class="{ 'drop-zone--active': isDragging, 'drop-zone--ready': selectedFiles.length > 0 }"
       @dragenter.prevent="isDragging = true"
       @dragleave.prevent="isDragging = false"
       @dragover.prevent
@@ -25,33 +25,43 @@
         ref="fileInput"
         type="file"
         accept=".json"
+        multiple
         class="hidden-input"
         @change="onFileChange"
       />
 
-      <div v-if="!selectedFile" class="drop-content">
+      <div v-if="selectedFiles.length === 0" class="drop-content">
         <div class="drop-icon">⬡</div>
-        <p class="drop-main">Arraste o arquivo aqui</p>
-        <p class="drop-sub">ou clique para selecionar &mdash; apenas <code>.json</code></p>
+        <p class="drop-main">Arraste os arquivos aqui</p>
+        <p class="drop-sub">ou clique para selecionar &mdash; múltiplos <code>.json</code> aceitos</p>
       </div>
 
-      <div v-else class="file-preview">
-        <div class="file-icon">◈</div>
-        <div class="file-info">
-          <span class="file-name">{{ selectedFile.name }}</span>
-          <span class="file-size">{{ formatBytes(selectedFile.size) }}</span>
+      <div v-else class="files-list">
+        <div
+          v-for="(f, idx) in selectedFiles"
+          :key="idx"
+          class="file-row"
+          @click.stop
+        >
+          <div class="file-icon">◈</div>
+          <div class="file-info">
+            <span class="file-name">{{ f.name }}</span>
+            <span class="file-size">{{ formatBytes(f.size) }}</span>
+          </div>
+
+          <div class="file-upload-progress" v-if="uploadProgressMap[idx] > 0 && uploadProgressMap[idx] < 100">
+            <div class="mini-bar">
+              <div class="mini-fill" :style="{ width: uploadProgressMap[idx] + '%' }" />
+            </div>
+            <span class="mini-pct">{{ uploadProgressMap[idx] }}%</span>
+          </div>
+          <span v-else-if="uploadProgressMap[idx] === 100" class="file-done">✓</span>
+          <button class="file-clear" @click.stop="removeFile(idx)">✕</button>
         </div>
-        <button class="file-clear" @click.stop="clearFile">✕</button>
-      </div>
-    </div>
 
-    <div v-if="uploadProgress > 0 && uploadProgress < 100" class="upload-progress">
-      <div class="progress-label">
-        <span>ENVIANDO</span>
-        <span>{{ uploadProgress }}%</span>
-      </div>
-      <div class="progress-bar">
-        <div class="progress-fill" :style="{ width: uploadProgress + '%' }" />
+        <button class="add-more-btn" @click.stop="fileInput.click()">
+          + adicionar mais arquivos
+        </button>
       </div>
     </div>
 
@@ -60,14 +70,23 @@
       {{ error }}
     </div>
 
+    <div v-if="activeJobs.length > 0" class="active-jobs-hint">
+      <span class="hint-icon">◎</span>
+      <span>{{ activeJobs.length }} job(s) em processamento —</span>
+      <router-link :to="{ name: 'jobs' }" class="hint-link">ver painel de jobs →</router-link>
+    </div>
+
     <div class="upload-actions">
+      <router-link :to="{ name: 'jobs' }" class="btn btn-ghost" v-if="jobs.length > 0">
+        VER JOBS ({{ jobs.length }})
+      </router-link>
       <button
         class="btn btn-primary btn-lg"
-        :disabled="!selectedFile || isUploading"
+        :disabled="selectedFiles.length === 0 || isUploading"
         @click="startAnalysis"
       >
-        <span v-if="isUploading">PROCESSANDO...</span>
-        <span v-else>INICIAR ANÁLISE →</span>
+        <span v-if="isUploading">ENVIANDO {{ uploadingIndex + 1 }}/{{ selectedFiles.length }}...</span>
+        <span v-else>INICIAR {{ selectedFiles.length > 1 ? selectedFiles.length + ' ANÁLISES' : 'ANÁLISE' }} →</span>
       </button>
     </div>
   </div>
@@ -77,57 +96,84 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { analysisApi } from '@/services/api'
+import { useJobStore } from '@/composables/useJobStore'
 
 const router = useRouter()
+const { jobs, activeJobs, addJob } = useJobStore()
 
-const fileInput     = ref(null)
-const selectedFile  = ref(null)
-const isDragging    = ref(false)
-const isUploading   = ref(false)
-const uploadProgress = ref(0)
-const error         = ref('')
+const fileInput        = ref(null)
+const selectedFiles    = ref([])
+const isDragging       = ref(false)
+const isUploading      = ref(false)
+const uploadProgressMap = ref({})
+const uploadingIndex   = ref(0)
+const error            = ref('')
 
 function onFileChange(e) {
-  const file = e.target.files?.[0]
-  if (file) setFile(file)
+  const files = Array.from(e.target.files ?? [])
+  addFiles(files)
+  e.target.value = ''
 }
 
 function onDrop(e) {
   isDragging.value = false
-  const file = e.dataTransfer.files?.[0]
-  if (file?.name.endsWith('.json')) setFile(file)
-  else error.value = 'Apenas arquivos .json são aceitos.'
+  const files = Array.from(e.dataTransfer.files ?? []).filter(f => f.name.endsWith('.json'))
+  if (files.length === 0) {
+    error.value = 'Apenas arquivos .json são aceitos.'
+    return
+  }
+  addFiles(files)
 }
 
-function setFile(file) {
-  selectedFile.value = file
+function addFiles(files) {
   error.value = ''
-  uploadProgress.value = 0
+  for (const f of files) {
+    if (!f.name.endsWith('.json')) continue
+    if (!selectedFiles.value.find(x => x.name === f.name && x.size === f.size)) {
+      selectedFiles.value.push(f)
+    }
+  }
 }
 
-function clearFile() {
-  selectedFile.value = null
-  uploadProgress.value = 0
-  error.value = ''
-  if (fileInput.value) fileInput.value.value = ''
+function removeFile(idx) {
+  selectedFiles.value.splice(idx, 1)
+  delete uploadProgressMap.value[idx]
 }
 
 async function startAnalysis() {
-  if (!selectedFile.value) return
+  if (selectedFiles.value.length === 0) return
 
-  isUploading.value   = true
-  uploadProgress.value = 0
-  error.value          = ''
+  isUploading.value = true
+  error.value = ''
 
-  try {
-    const { jobId } = await analysisApi.upload(
-      selectedFile.value,
-      p => { uploadProgress.value = p }
-    )
-    router.push({ name: 'progress', params: { id: jobId } })
-  } catch (err) {
-    error.value = err.message
-    isUploading.value = false
+  const createdJobs = []
+
+  for (let i = 0; i < selectedFiles.value.length; i++) {
+    uploadingIndex.value = i
+    const file = selectedFiles.value[i]
+
+    try {
+      const { jobId } = await analysisApi.upload(
+        file,
+        p => { uploadProgressMap.value = { ...uploadProgressMap.value, [i]: p } }
+      )
+      uploadProgressMap.value = { ...uploadProgressMap.value, [i]: 100 }
+
+      addJob({ jobId, fileName: file.name, totalSamples: 0 })
+      createdJobs.push(jobId)
+    } catch (err) {
+      error.value = `Erro no arquivo "${file.name}": ${err.message}`
+      isUploading.value = false
+      return
+    }
+  }
+
+  isUploading.value = false
+
+  if (createdJobs.length === 1) {
+    router.push({ name: 'progress', params: { id: createdJobs[0] } })
+  } else {
+    router.push({ name: 'jobs' })
   }
 }
 
@@ -156,10 +202,7 @@ function formatBytes(bytes) {
   color: var(--text-primary);
 }
 
-.upload-title em {
-  font-style: normal;
-  color: var(--amber);
-}
+.upload-title em { font-style: normal; color: var(--amber); }
 
 .upload-desc {
   color: var(--text-secondary);
@@ -195,6 +238,9 @@ function formatBytes(bytes) {
   border-style: solid;
   border-color: var(--amber);
   background: var(--amber-dim);
+  padding: 1.5rem 2rem;
+  text-align: left;
+  cursor: default;
 }
 
 .hidden-input { display: none; }
@@ -217,58 +263,91 @@ function formatBytes(bytes) {
   margin-bottom: 0.5rem;
 }
 
-.drop-sub {
-  font-size: 0.75rem;
-  color: var(--text-muted);
+.drop-sub { font-size: 0.75rem; color: var(--text-muted); }
+.drop-sub code { color: var(--amber); }
+
+.files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.drop-sub code {
-  color: var(--amber);
-}
-
-.file-preview {
+.file-row {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.875rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  transition: border-color var(--transition);
 }
 
-.file-icon {
-  font-size: 2rem;
-  color: var(--amber);
-}
+.file-row:hover { border-color: var(--border-light); }
+
+.file-icon { font-size: 1.25rem; color: var(--amber); flex-shrink: 0; }
 
 .file-info {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  text-align: left;
+  gap: 0.2rem;
+  min-width: 0;
 }
 
 .file-name {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 700;
   color: var(--text-primary);
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.file-size {
-  font-size: 0.7rem;
-  color: var(--text-muted);
+.file-size { font-size: 0.68rem; color: var(--text-muted); }
+
+.file-upload-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.mini-bar {
+  width: 80px;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mini-fill {
+  height: 100%;
+  background: var(--amber);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.mini-pct { font-size: 0.65rem; color: var(--text-muted); }
+
+.file-done {
+  color: var(--green);
+  font-size: 1rem;
+  flex-shrink: 0;
 }
 
 .file-clear {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-muted);
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   transition: all var(--transition);
   flex-shrink: 0;
 }
@@ -279,30 +358,48 @@ function formatBytes(bytes) {
   background: var(--red-dim);
 }
 
-.upload-progress { display: flex; flex-direction: column; gap: 0.5rem; }
-
-.progress-label {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.65rem;
-  letter-spacing: 0.1em;
+.add-more-btn {
+  background: transparent;
+  border: 1px dashed var(--border-light);
   color: var(--text-muted);
+  border-radius: var(--radius-md);
+  padding: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: all var(--transition);
+  width: 100%;
+  text-align: center;
 }
 
-.progress-bar {
-  height: 3px;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
+.add-more-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+  background: var(--amber-dim);
 }
 
-.progress-fill {
-  height: 100%;
-  background: var(--amber);
-  border-radius: 2px;
-  transition: width 0.3s ease;
-  box-shadow: 0 0 8px var(--amber-glow);
+.active-jobs-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
 }
+
+.hint-icon { color: var(--amber); animation: spin 2s linear infinite; }
+
+.hint-link {
+  color: var(--amber);
+  text-decoration: none;
+  margin-left: auto;
+}
+
+.hint-link:hover { text-decoration: underline; }
 
 .error-banner {
   display: flex;
@@ -316,13 +413,18 @@ function formatBytes(bytes) {
   color: var(--red);
 }
 
-.error-icon { font-size: 1rem; }
-
-.upload-actions { display: flex; justify-content: flex-end; }
+.upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 1rem;
+}
 
 .btn-lg {
   padding: 1rem 2.5rem;
   font-size: 0.85rem;
   letter-spacing: 0.1em;
 }
+
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
