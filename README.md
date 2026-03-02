@@ -1,6 +1,6 @@
 # Sensor Analysis
 
-Sistema completo para processamento assíncrono de amostras de sensores ambientais com detecção de anomalias, fila de notificações via RabbitMQ e dashboard interativo.
+Sistema completo para processamento assíncrono de amostras de sensores ambientais com detecção de anomalias, fila de notificações via RabbitMQ e dashboard interativo com suporte a múltiplas análises simultâneas.
 
 ---
 
@@ -61,6 +61,7 @@ dotnet test
 ---
 
 ## Estrutura do Projeto
+
 ```
 SensorAnalysis/
 ├── docker-compose.yml
@@ -68,26 +69,29 @@ SensorAnalysis/
 ├── SensorAnalysis.sln
 ├── SensorAnalysis.API/
 │   ├── Controllers/
-│   │   └── AnalysisController.cs     # Endpoints REST
+│   │   └── AnalysisController.cs          # Endpoints REST
 │   ├── Models/
-│   │   ├── SensorReading.cs          # Entidade de entrada
-│   │   ├── AnalysisResult.cs         # Resultado por amostra
-│   │   ├── ThresholdConfig.cs        # Limites configuráveis
-│   │   ├── ProcessingJob.cs          # Estado do job assíncrono
-│   │   └── NotificationMessage.cs    # Mensagem de fila
+│   │   ├── SensorReading.cs               # Entidade de entrada
+│   │   ├── AnalysisResult.cs              # Resultado por amostra
+│   │   ├── ThresholdConfig.cs             # Limites configuráveis
+│   │   ├── ProcessingJob.cs               # Estado do job + DashboardSummary
+│   │   └── NotificationMessage.cs         # Mensagem de fila
 │   ├── Services/
-│   │   ├── IThresholdAnalysisService # Análise de limites por variável
-│   │   ├── IAnomalyDetectionService  # Detecção de anomalias (Z-Score + IQR)
-│   │   ├── ISampleAnalyzerService    # Orquestra threshold + anomalia por amostra
-│   │   ├── IAnalysisOrchestrator     # Gerencia o job assíncrono
-│   │   └── IJobRepository            # Persistência em memória dos jobs
+│   │   ├── IThresholdAnalysisService      # Análise de limites por variável
+│   │   ├── IAnomalyDetectionService       # Detecção de anomalias (Z-Score + IQR)
+│   │   ├── ISampleAnalyzerService         # Fit estatístico + análise por amostra
+│   │   ├── IAnalysisOrchestrator          # Enfileira jobs no Channel
+│   │   ├── IAnalysisJobProcessor          # Processa um job (testável isoladamente)
+│   │   ├── AnalysisBackgroundService      # IHostedService — consome o Channel
+│   │   └── IJobRepository                 # Persistência em memória dos jobs
 │   ├── Queue/
-│   │   └── RabbitMqNotificationQueue # Publicação na fila RabbitMQ
+│   │   ├── RabbitMqNotificationQueue      # Publicação na fila RabbitMQ
+│   │   └── InMemoryNotificationQueue      # Fallback para ambiente sem RabbitMQ
 │   ├── Middleware/
-│   │   └── GlobalExceptionMiddleware # Tratamento centralizado de erros
+│   │   └── GlobalExceptionMiddleware      # Tratamento centralizado de erros
 │   └── Extensions/
-│       ├── ServiceCollectionExtensions.cs  # Registro de DI
-│       └── RabbitMqExtensions.cs           # Registro da conexão RabbitMQ
+│       ├── ServiceCollectionExtensions.cs # Registro de DI + Channel
+│       └── RabbitMqExtensions.cs          # Registro da conexão RabbitMQ
 ├── SensorAnalysis.Tests/
 │   ├── ThresholdAnalysisServiceTests.cs
 │   └── AnomalyDetectionServiceTests.cs
@@ -95,22 +99,26 @@ SensorAnalysis/
     ├── Dockerfile
     ├── nginx.conf
     └── src/
+        ├── main.js                        # App + roteador
         ├── views/
-        │   ├── UploadView.vue       # Tela de upload com drag-and-drop
-        │   ├── ProgressView.vue     # Polling de progresso com timeline
-        │   └── DashboardView.vue    # Dashboard completo com KPIs e gráficos
+        │   ├── UploadView.vue             # Upload de múltiplos arquivos simultâneos
+        │   ├── JobsView.vue               # Painel de todos os jobs com polling
+        │   ├── ProgressView.vue           # Progresso individual com timeline
+        │   └── DashboardView.vue          # Dashboard com KPIs e gráficos
         ├── components/
-        │   ├── KpiCard.vue          # Card reutilizável de métrica
-        │   ├── StatusBadge.vue      # Badge animado de status
-        │   ├── TimeSeriesChart.vue  # Gráfico temporal paginado com limites
-        │   └── SummaryDonut.vue     # Donut chart de distribuição
+        │   ├── JobCard.vue                # Card de job com progresso em tempo real
+        │   ├── KpiCard.vue                # Card reutilizável de métrica
+        │   ├── StatusBadge.vue            # Badge animado de status
+        │   ├── TimeSeriesChart.vue        # Gráfico temporal paginado com limites
+        │   └── SummaryDonut.vue           # Donut chart de distribuição
         ├── composables/
-        │   └── usePolling.js        # Polling genérico com stop automático
+        │   ├── usePolling.js              # Polling genérico com stop automático
+        │   └── useJobStore.js             # Estado global de jobs + localStorage
         └── services/
-            └── api.js               # Camada HTTP com Axios
+            └── api.js                     # Camada HTTP com Axios
 ```
 
-**Princípios aplicados:** SOLID, Dependency Injection, Interface Segregation, Clean Architecture por camadas, async/await correto (fire-and-forget com `Task.Run`).
+**Princípios aplicados:** SOLID, Dependency Injection, Interface Segregation, Clean Architecture por camadas, processamento assíncrono via `BackgroundService` + `Channel<T>`, paralelismo com `Parallel.ForEachAsync`.
 
 ---
 
@@ -125,6 +133,19 @@ SensorAnalysis/
 
 ---
 
+## Arquitetura de Processamento Assíncrono
+
+O processamento de jobs segue um modelo produtor/consumidor desacoplado:
+
+1. O `AnalysisController` recebe o upload e chama o `AnalysisOrchestrator`
+2. O `AnalysisOrchestrator` cria o registro do job e publica um `AnalysisWorkItem` no `Channel<T>`
+3. O `AnalysisBackgroundService` (`IHostedService`) consome o Channel e delega para o `AnalysisJobProcessor`
+4. O `AnalysisJobProcessor` executa o `Fit` estatístico sequencialmente e depois processa as amostras em paralelo via `Parallel.ForEachAsync`
+
+Esse modelo garante que o processamento sobrevive ao ciclo de vida da requisição HTTP e é gerenciado corretamente pelo host do ASP.NET Core.
+
+---
+
 ## Algoritmos de Detecção de Anomalia
 
 ### Z-Score (3σ)
@@ -135,6 +156,8 @@ Valores fora de `[Q1 - 1.5*IQR, Q3 + 1.5*IQR]` são considerados anomalias.
 
 ### Heurística de Sensor Travado
 Sensores em que mais de 80% das leituras de umidade possuem exatamente o mesmo valor são sinalizados como potencialmente travados/com falha.
+
+O `Fit` estatístico é calculado uma vez sobre o conjunto completo antes da análise paralela, garantindo que o contexto (médias, desvios, quartis) seja consistente para todas as amostras do job.
 
 ---
 
@@ -164,3 +187,9 @@ Formato da mensagem:
   "motivo": "critical"
 }
 ```
+
+---
+
+## Upload de Múltiplos Arquivos
+
+A interface suporta o envio de múltiplos arquivos `.json` simultaneamente. Cada arquivo gera um job independente, visível no painel de jobs (`/jobs`) com progresso em tempo real e acesso direto ao dashboard de cada análise. O histórico de jobs é mantido no `localStorage` do navegador.
