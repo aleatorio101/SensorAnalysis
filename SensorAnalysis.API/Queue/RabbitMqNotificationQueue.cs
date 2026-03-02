@@ -21,7 +21,6 @@ public class RabbitMqNotificationQueue : INotificationQueue, IDisposable
         _logger     = logger;
 
         _channel = _connection.CreateModel();
-
         _channel.QueueDeclare(
             queue:      QueueName,
             durable:    true,
@@ -34,11 +33,11 @@ public class RabbitMqNotificationQueue : INotificationQueue, IDisposable
     {
         try
         {
-            var json = JsonSerializer.Serialize(message, new JsonSerializerOptions
+            var json  = JsonSerializer.Serialize(message, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             });
-            var body = Encoding.UTF8.GetBytes(json);
+            var body  = Encoding.UTF8.GetBytes(json);
 
             var props = _channel.CreateBasicProperties();
             props.Persistent   = true;
@@ -63,7 +62,27 @@ public class RabbitMqNotificationQueue : INotificationQueue, IDisposable
         }
     }
 
-    public IReadOnlyList<NotificationMessage> DequeueAll() => [];
+    public IReadOnlyList<NotificationMessage> DequeueAll()
+    {
+        var messages = new List<NotificationMessage>();
+
+        while (true)
+        {
+            var result = _channel.BasicGet(QueueName, autoAck: true);
+            if (result is null) break;
+
+            var json = Encoding.UTF8.GetString(result.Body.ToArray());
+            var message = JsonSerializer.Deserialize<NotificationMessage>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (message is not null)
+                messages.Add(message);
+        }
+
+        return messages;
+    }
 
     public void Dispose()
     {
