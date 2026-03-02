@@ -181,11 +181,13 @@ const error   = ref('')
 
 const activeType = ref('all')
 
-const typeFilters = [
-  { value: 'all',    label: 'TODOS' },
-  { value: 'FM5308', label: 'FM5308' },
-  { value: 'AM2302', label: 'AM2302' }
-]
+const typeFilters = computed(() => {
+  const types = [...new Set(allResults.value.map(r => r.type).filter(Boolean))]
+  return [
+    { value: 'all', label: 'TODOS' },
+    ...types.map(t => ({ value: t, label: t }))
+  ]
+})
 
 const filteredResults = computed(() =>
   activeType.value === 'all'
