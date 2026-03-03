@@ -11,9 +11,6 @@ public sealed class AnalysisJobProcessor : IAnalysisJobProcessor
     private readonly INotificationQueue            _queue;
     private readonly ILogger<AnalysisJobProcessor> _logger;
 
-    // Quantas amostras são analisadas em paralelo por job.
-    // Environment.ProcessorCount aproveita todos os cores disponíveis.
-    // Ajuste para um valor fixo (ex: 4) se quiser limitar o uso de CPU.
     private static readonly int Parallelism = Environment.ProcessorCount;
 
     public AnalysisJobProcessor(
@@ -38,11 +35,8 @@ public sealed class AnalysisJobProcessor : IAnalysisJobProcessor
 
         try
         {
-            // Fase 1 — Fit estatístico: precisa de todos os dados, roda sequencial.
-            // É rápido (apenas cálculo de médias/percentis), não vale paralelizar.
             _analyzer.Fit(item.Readings);
 
-            // Fase 2 — Análise paralela: cada amostra é independente após o Fit.
             var results       = new ConcurrentBag<AnalysisResult>();
             var notifications = new ConcurrentBag<NotificationMessage>();
             int processed     = 0;
@@ -66,11 +60,8 @@ public sealed class AnalysisJobProcessor : IAnalysisJobProcessor
                         notifications.Add(notification);
                     }
 
-                    // Incremento atômico sem lock
                     var current = Interlocked.Increment(ref processed);
 
-                    // Atualiza progresso a cada 500 amostras para não
-                    // sobrecarregar o repositório com 50k writes
                     if (current % 500 == 0 || current == item.Readings.Count)
                     {
                         job.ProcessedSamples = current;
@@ -80,7 +71,6 @@ public sealed class AnalysisJobProcessor : IAnalysisJobProcessor
                     return ValueTask.CompletedTask;
                 });
 
-            // Ordena pelo timestamp para o frontend exibir os gráficos corretamente
             var orderedResults = results
                 .OrderBy(r => r.Timestamp)
                 .ToList();
